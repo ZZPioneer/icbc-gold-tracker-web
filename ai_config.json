@@ -1,0 +1,9 @@
+{
+  "_说明": "DeepSeek AI 分析配置。把下面 api_key 留空处填入你的 DeepSeek API Key 即可启用 AI 点评；留空时仍会自动记录涨跌特征并生成 md，只是 AI 点评部分会标注为未配置。",
+  "api_key": "",
+  "base_url": "https://api.deepseek.com",
+  "model": "deepseek-chat",
+  "timeout": 60,
+  "auto_on_close": true,
+  "report_dir": "行情记录"
+}

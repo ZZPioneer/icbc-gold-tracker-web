@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="data:,">
+<title>工行积存金 · 实盘跟踪</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<!-- 一级导航：积存金跟踪 / 大盘云图 -->
+<nav class="global-nav" id="globalNav">
+  <div class="gn-brand"><span class="gn-logo">金</span><span>实盘跟踪台</span></div>
+  <div class="gn-tabs" role="tablist">
+    <button type="button" class="gn-tab active" data-view="gold" id="navGold" role="tab" aria-selected="true">积存金跟踪</button>
+    <button type="button" class="gn-tab" data-view="marketmap" id="navMarketMap" role="tab" aria-selected="false">大盘云图</button>
+    <button type="button" class="gn-tab" data-view="corr" id="navCorr" role="tab" aria-selected="false">盘面分析</button>
+  </div>
+  <div class="gn-note">本地运行 · 数据存于 MySQL</div>
+</nav>
+
+<div class="view" id="view-gold">
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo" aria-hidden="true">金</div>
+      <div>
+        <h1>工行积存金 · 实盘跟踪</h1>
+        <div class="sub">
+          数据源：<a href="https://icbcphp.icbc.com.cn/icbc/newperbank/perbank3/gold/goldaccrual_query_out.jsp" target="_blank" rel="noopener noreferrer">工行积存金行情查询</a>
+          <span class="sep">·</span><span id="sourceTime">工行更新时间 --</span>
+        </div>
+      </div>
+    </div>
+    <div class="toolbar">
+      <span class="status" id="status" aria-live="polite">
+        <i class="dot" id="statusDot"></i><span id="statusText">连接中</span>
+      </span>
+      <span class="meta-pill" id="latency" title="工行页面响应耗时">上游 -- ms</span>
+      <span class="meta-pill storage-file" id="storageMode" title="持仓、节点、昨收基准、买入/赎回记录保存在 MySQL 数据库 gold_tracker.portfolio（加密）">数据库</span>
+      <div class="refresh-box" title="自动刷新倒计时">
+        <div class="progress"><i id="progressBar"></i></div>
+        <span id="countdown">4.0s</span>
+      </div>
+      <label class="sr-only" for="interval">刷新间隔</label>
+      <select id="interval">
+        <option value="2">2 秒</option>
+        <option value="4" selected>4 秒</option>
+        <option value="5">5 秒</option>
+        <option value="10">10 秒</option>
+        <option value="30">30 秒</option>
+      </select>
+      <button type="button" class="primary" id="refreshBtn">刷新</button>
+      <a class="btn" href="/api/export.csv" download>导出 CSV</a>
+      <span class="user-chip" id="userChip" hidden>
+        <i class="avatar" id="userAvatar">U</i><span id="userName">—</span>
+        <button type="button" class="logout" id="logoutBtn" title="退出登录">退出</button>
+      </span>
+    </div>
+  </header>
+
+  <div class="banner" id="banner" role="status" aria-live="polite"></div>
+
+  <section class="hero" aria-label="价格概览">
+    <article class="card card-main">
+      <div class="card-top"><span class="label" id="mainLabel">实时主动积存价格</span><span class="tag" id="mainTag">积存金</span></div>
+      <div class="value" id="cardActive">--<small>元/克</small></div>
+      <div class="meta" id="cardActiveMeta">等待数据…</div>
+      <canvas class="spark" id="spark" width="240" height="88" aria-hidden="true"></canvas>
+    </article>
+    <article class="card">
+      <div class="card-top"><span class="label">定期积存价</span><span class="tag">定投</span></div>
+      <div class="value" id="cardRegular">--<small>元/克</small></div>
+      <div class="meta" id="cardRegularMeta">等待数据…</div>
+    </article>
+    <article class="card">
+      <div class="card-top"><span class="label">赎回价</span><span class="tag">卖出</span></div>
+      <div class="value" id="cardRedeem">--<small>元/克</small></div>
+      <div class="meta" id="cardRedeemMeta">等待数据…</div>
+    </article>
+    <article class="card">
+      <div class="card-top"><span class="label">今日价格区间</span><span class="tag" id="rangeTag">积存金</span></div>
+      <div class="value value-sm" id="cardRange">--</div>
+      <div class="meta" id="cardRangeMeta">最低 — 最高</div>
+      <div class="range" id="rangeBar"><i></i></div>
+    </article>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <div class="panel-title">实时行情 <span id="fetchTime">本地采集 --</span></div>
+      <div class="panel-tools">
+        <button type="button" class="btn-mini" id="goldInfoBtn" title="查看与编辑金种备注、星标">金种资料</button>
+        <div class="tabs" id="goldTabs" role="tablist"></div>
+      </div>
+    </div>
+    <div class="table-scroll">
+      <table class="quote-table">
+        <thead><tr>
+          <th>金种</th><th>实时主动<br>积存价格</th><th>涨跌</th><th>最低价</th><th>最高价</th>
+          <th>定期<br>积存价</th><th>涨跌</th><th>赎回价</th><th>涨跌</th>
+        </tr></thead>
+        <tbody id="quoteBody">
+          <tr><td colspan="9" class="placeholder">正在获取工行行情…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <div class="panel-title">我的持仓 <span>按实时行情自动计算盈亏，数据仅保存在本浏览器</span></div>
+      <span class="meta-pill" id="positionUpdated">未保存</span>
+    </div>
+    <div class="position-body">
+      <form class="position-form" id="positionForm">
+        <label>金种<select id="posGold"></select></label>
+        <label>持有克数<input id="posGrams" type="number" step="0.0001" min="0" value="10.0000" required></label>
+        <label>成本价（元/克）<input id="posCost" type="number" step="0.0001" min="0" value="886.86" required></label>
+        <label>总成本（可选）<input id="posTotal" type="number" step="0.01" min="0" value="8868.62" placeholder="留空 = 克数 × 成本价"></label>
+        <label>计价基准<select id="posBasis">
+          <option value="active" selected>主动积存价</option>
+          <option value="redeem">赎回价</option>
+          <option value="regular">定期积存价</option>
+        </select></label>
+        <div class="form-actions">
+          <button type="submit" class="primary">保存持仓</button>
+          <button type="button" id="posClear">清除</button>
+        </div>
+      </form>
+      <div class="position-result" id="positionResult">
+        <div class="position-empty">按截图预填了 10 克 / 886.86 元，点「保存持仓」后即可实时跟踪盈亏。</div>
+      </div>
+      <div class="position-nodes" id="positionNodesBox">
+        <div class="nodes-head">
+          <span>持仓节点 <span class="nodes-hint">每次保存自动在走势图上打点</span></span>
+          <button type="button" id="posClearNodes">清空节点</button>
+        </div>
+        <div class="nodes-list" id="positionNodes"><span class="nodes-empty">暂无节点</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <div class="panel-title">买入 / 赎回记录 <span>手动记账，按实时行情计算每笔盈亏（仅保存在本浏览器）</span></div>
+      <span class="meta-pill" id="tradeCount">0 笔</span>
+    </div>
+    <form class="trade-form" id="tradeForm">
+      <label class="tf-type">类型<select id="tradeType">
+        <option value="buy" selected>买入</option>
+        <option value="sell">赎回</option>
+      </select></label>
+      <label class="tf-gold">金种<select id="tradeGold"></select></label>
+      <label class="tf-grams">克数<input id="tradeGrams" type="number" step="0.0001" min="0" placeholder="如 10" required></label>
+      <label class="tf-price">成交价（元/克）<input id="tradePrice" type="number" step="0.0001" min="0" placeholder="如 815.50" required></label>
+      <label class="tf-cost" id="tradeCostBox" hidden>买入成本价（元/克）<input id="tradeCost" type="number" step="0.0001" min="0" placeholder="该笔对应的买入成本，用于算已实现盈亏"></label>
+      <label class="tf-time">成交时间<input id="tradeTime" type="datetime-local"></label>
+      <button type="submit" class="primary">添加记录</button>
+      <button type="button" id="tradeClear" class="muted-btn">清空</button>
+    </form>
+    <div class="trade-summary" id="tradeSummary"></div>
+    <div class="table-scroll">
+      <table class="trade-table">
+        <thead><tr>
+          <th>金种</th><th>类型</th><th class="h-num">克数</th><th class="h-num">成交价</th>
+          <th class="h-num">参考现价</th><th class="h-num">投入/成本</th><th class="h-num">盈亏</th>
+          <th class="h-num">收益率</th><th>成交时间</th><th></th>
+        </tr></thead>
+        <tbody id="tradeBody">
+          <tr><td colspan="10" class="placeholder">暂无交易记录，填写上方表单添加一笔买入吧</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="trade-note">买入盈亏 =（当前赎回价 − 买入价）× 克数，随行情实时刷新；赎回盈亏 =（赎回价 − 买入成本价）× 克数，为已实现盈亏，成交后固定。</div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <div class="panel-title">浮动盈亏 <span>两个口径基准不同 —— 别把「行情涨跌」当成「我的收益」</span></div>
+      <span class="meta-pill" id="pnlAsOf">--</span>
+    </div>
+    <div class="pnl-body">
+      <div class="baseline-bar">
+        <label>昨收基准价（元/克）
+          <input id="baselinePrice" type="number" step="0.0001" min="0" placeholder="上一交易日收盘价">
+        </label>
+        <button type="button" id="baselineSave" class="primary">保存基准</button>
+        <button type="button" id="baselineFirst">用今日首笔价</button>
+        <button type="button" id="baselineNow">用当前价</button>
+        <span class="baseline-target" id="baselineTarget">当前金种 --</span>
+        <span class="baseline-hint" id="baselineHint">工行页面只给涨跌方向、不提供昨收价，请手动填写</span>
+      </div>
+      <div class="table-scroll">
+        <table class="pnl-table">
+          <thead>
+            <tr>
+              <th rowspan="2">金种</th>
+              <th colspan="4" class="grp grp-market">① 行情涨跌幅 <small>基准 = 昨收</small></th>
+              <th colspan="5" class="grp grp-hold">② 我的持仓 <small>基准 = 我的成本</small></th>
+            </tr>
+            <tr>
+              <th>当前报价<br>主动价</th>
+              <th>昨收<br>基准价</th>
+              <th>涨跌额<br>元</th>
+              <th>涨跌幅</th>
+              <th>平均成本<br>元/克</th>
+              <th>赎回价<br>元/克</th>
+              <th>持有<br>克数</th>
+              <th>收益率</th>
+              <th>浮动盈亏<br>元</th>
+            </tr>
+          </thead>
+          <tbody id="pnlBody">
+            <tr><td colspan="10" class="placeholder">正在计算…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="pnl-explain">
+        <div class="explain-item market">
+          <b>① 行情涨跌幅</b> =（当前报价 − 昨收基准价）÷ 昨收基准价 × 100%。金价相对<b>昨天收盘</b>的涨跌，一日多价、随实时报价变动，与你的持仓无关。
+        </div>
+        <div class="explain-item hold">
+          <b>② 持仓收益率</b> =（当前赎回价 − 我的平均成本）÷ 平均成本 × 100%；<b>浮动盈亏</b> =（赎回价 − 平均成本）× 持有克数。金价相对<b>你的买入均价</b>的赚亏；定投摊薄成本后通常 ≠ 行情涨跌幅。
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <div class="panel-title">价格走势 <span id="chartSub">按采集快照绘制</span></div>
+      <div class="tabs" id="rangeTabs" role="tablist">
+        <button type="button" data-range="15" class="active">近 15 分钟</button>
+        <button type="button" data-range="60">近 1 小时</button>
+        <button type="button" data-range="240">近 4 小时</button>
+        <button type="button" data-range="0">全部</button>
+      </div>
+    </div>
+    <div class="chart-wrap">
+      <canvas id="chart"></canvas>
+      <div id="tip" role="tooltip"></div>
+      <div class="empty" id="chartEmpty" hidden>暂无历史数据，采集几次后将自动绘制走势图</div>
+    </div>
+    <div class="legend" id="legend">
+      <label><input type="checkbox" data-series="active" checked><i style="--c:#e8b54a"></i>实时主动积存价格</label>
+      <label><input type="checkbox" data-series="regular"><i style="--c:#5aa9f7"></i>定期积存价</label>
+      <label><input type="checkbox" data-series="redeem"><i style="--c:#35c07a"></i>赎回价</label>
+      <label><input type="checkbox" data-series="cost"><i style="--c:#e9b94f"></i>我的成本价</label>
+      <span class="legend-sep">右轴（%）</span>
+      <label><input type="checkbox" data-series="change" checked><i style="--c:#a98cf7"></i>行情涨跌幅（对昨收）</label>
+      <span class="legend-sep">交易标记</span>
+      <label><input type="checkbox" data-series="trades" checked><b class="legend-tri buy"></b><b class="legend-tri sell"></b>买入 / 赎回（克数·时间）</label>
+      <span class="legend-tip">▲ 买入　▼ 赎回　·　悬停标记看成交价与时间</span>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <div class="panel-title">持仓盈亏走势 <span id="pnlChartSub">按当前持仓成本回溯计算</span></div>
+      <div class="tabs" id="pnlRangeTabs" role="tablist">
+        <button type="button" data-range="15" class="active">近 15 分钟</button>
+        <button type="button" data-range="60">近 1 小时</button>
+        <button type="button" data-range="240">近 4 小时</button>
+        <button type="button" data-range="0">全部</button>
+      </div>
+      <span class="meta-pill" id="pnlChartBadge">未保存持仓</span>
+    </div>
+    <div class="pnl-kpi" id="pnlKpi">
+      <div class="pk-item pk-main">
+        <span class="pk-label">当前浮动盈亏</span>
+        <span class="pk-value" id="pkPnl">—</span>
+        <span class="pk-sub" id="pkPnlSub">保存持仓后显示</span>
+      </div>
+      <div class="pk-item">
+        <span class="pk-label">盈亏比</span>
+        <span class="pk-value" id="pkPct">—</span>
+        <span class="pk-sub">浮动盈亏 ÷ 持仓成本</span>
+      </div>
+      <div class="pk-item">
+        <span class="pk-label">参考市值</span>
+        <span class="pk-value" id="pkMarket">—</span>
+        <span class="pk-sub" id="pkMarketSub">现价 × 持有克数</span>
+      </div>
+      <div class="pk-item">
+        <span class="pk-label">持仓成本</span>
+        <span class="pk-value" id="pkCost">—</span>
+        <span class="pk-sub" id="pkCostSub">成本价 × 持有克数</span>
+      </div>
+      <div class="pk-item">
+        <span class="pk-label">回本需涨</span>
+        <span class="pk-value" id="pkBe">—</span>
+        <span class="pk-sub">现价回到成本价所需涨幅</span>
+      </div>
+    </div>
+    <div class="chart-wrap">
+      <canvas id="pnlChart"></canvas>
+      <div id="pnlTip" role="tooltip"></div>
+      <div class="empty" id="pnlChartEmpty" hidden>保存持仓后自动绘制浮动盈亏与盈亏比走势</div>
+    </div>
+    <div class="legend" id="pnlLegend">
+      <span class="legend-caption">曲线</span>
+      <label><input type="checkbox" data-series="amount" checked><i style="--c:#f0a35e"></i>浮动盈亏（元 · 左轴）</label>
+      <label><input type="checkbox" data-series="pct" checked><i style="--c:#a98cf7"></i>盈亏比（% · 右轴）</label>
+      <label><input type="checkbox" data-series="zero" checked><i style="--c:#5c6b82"></i>回本线（0）</label>
+      <span class="legend-tip">黄金菱形 = 持仓节点 · 上方数值按当前行情实时计算</span>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <div class="panel-title">K 线走势 <span id="klineSub">按每日开高低收绘制 · 红涨绿跌</span></div>
+      <div class="tabs" id="klinePeriodTabs" role="tablist">
+        <button type="button" data-period="day" class="active">日 K</button>
+        <button type="button" data-period="week">周 K</button>
+        <button type="button" data-period="month">月 K</button>
+      </div>
+      <span class="meta-pill" id="klineBadge">— 根 K 线</span>
+    </div>
+    <div class="chart-wrap">
+      <canvas id="klineChart"></canvas>
+      <div id="klineTip" role="tooltip"></div>
+      <div class="empty" id="klineEmpty" hidden>暂无历史数据，采集几天后自动绘制 K 线</div>
+    </div>
+    <div class="legend" id="klineLegend">
+      <span class="legend-caption">蜡烛</span>
+      <label><i style="--c:#f2555a"></i>阳线（收盘 ≥ 开盘）</label>
+      <label><i style="--c:#35c07a"></i>阴线（收盘 &lt; 开盘）</label>
+      <span class="legend-tip">实体为开盘→收盘，上下影线为当期最高/最低；周K按自然周、月K按自然月聚合 · 悬停看详情</span>
+    </div>
+  </section>
+
+  <section class="panel" id="analysisPanel">
+    <div class="panel-head">
+      <div class="panel-title">AI 每日分析 <span>收盘后自动生成涨跌特征复盘 · 存档于「行情记录」文件夹</span></div>
+      <div class="panel-tools">
+        <label class="sr-only" for="analysisDate">分析日期</label>
+        <input type="date" id="analysisDate" title="要生成/查看的日期">
+        <button type="button" class="btn-mini" id="analysisGenBtn" title="重新生成当日报告（会重新调用 AI）">生成/刷新</button>
+        <span class="meta-pill" id="analysisConfigPill" title="DeepSeek API Key 配置状态">AI 检测中…</span>
+      </div>
+    </div>
+    <div class="analysis-body">
+      <div class="analysis-list" id="analysisList">
+        <div class="analysis-empty">暂无报告，收盘后自动生成，或点「生成/刷新」</div>
+      </div>
+      <div class="analysis-doc" id="analysisDoc">
+        <div class="analysis-empty">从左侧选择一份报告查看，或点「生成/刷新」创建当日分析</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <div class="panel-title">最近采集记录 <span>每次成功抓取自动留痕 · 红涨绿跌</span></div>
+      <span class="meta-pill" id="historyCount">0 条快照</span>
+    </div>
+    <div class="history-body">
+      <table class="history-table">
+        <thead><tr>
+          <th class="h-time">采集时间</th><th class="h-name">金种</th>
+          <th class="h-num">实时主动<br>积存价格</th><th class="h-num">定期<br>积存价</th>
+          <th class="h-num">赎回价</th><th class="h-num">较上次</th>
+        </tr></thead>
+        <tbody id="historyBody">
+          <tr><td colspan="6" class="placeholder">暂无记录</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    行情来自工行官网公开页面，可能有延迟；交易决策请以工商银行实际成交价为准。<br>
+    本地运行，数据统一存于 MySQL <code>gold_tracker</code> 库，个人数据加密存储，可通过 CSV 导出复盘。
+  </footer>
+</div>
+</div><!-- /view-gold -->
+
+<!-- ============ 大盘云图视图 ============ -->
+<div class="view" id="view-marketmap" hidden>
+  <div class="mm-app">
+    <aside class="mm-side">
+      <div class="mm-brand">
+        <div class="mm-brand-logo">云</div>
+        <div><h2>大盘云图</h2><span>全市场涨跌热力地图</span></div>
+      </div>
+      <div class="mm-markets" id="mmMarkets" role="tablist">
+        <div class="mm-placeholder">市场加载中…</div>
+      </div>
+      <div class="mm-overview" id="mmOverview" hidden>
+        <div class="mm-sec-title">市场概览 <span id="mmOverviewPeriod">今日</span></div>
+        <div class="mm-ov-list" id="mmOvList"></div>
+      </div>
+      <div class="mm-stats" id="mmStats">
+        <div class="mm-stats-empty">选择市场后显示统计</div>
+      </div>
+      <div class="mm-side-tools">
+        <button type="button" class="mm-side-tool" id="mmWatchlistBtn"><span class="mst-ico">★</span>我的自选 <span class="mst-badge" id="mmWatchBadge">0</span></button>
+        <button type="button" class="mm-side-tool" id="mmToolsBtn"><span class="mst-ico">⌘</span>投研工具 <span class="mst-arrow">›</span></button>
+      </div>
+      <div class="mm-side-foot">
+        <div class="mm-data-note" id="mmDataNote">数据：原站缓存快照 · 仅供复盘参考</div>
+      </div>
+    </aside>
+
+    <main class="mm-main">
+      <div class="mm-toolbar">
+        <div class="mm-title-wrap">
+          <h1 id="mmTitle">A股全图</h1>
+          <span class="mm-pill" id="mmScaleNote">面积 = 市值 · 颜色 = 涨跌幅</span>
+          <span class="mm-pill mm-stale" id="mmStalePill" hidden>缓存快照</span>
+        </div>
+        <div class="mm-tools">
+          <div class="mm-seg" id="mmPeriods" role="tablist" title="涨跌周期">
+            <button type="button" data-period="day" class="active">今日</button>
+            <button type="button" data-period="week">近5日</button>
+            <button type="button" data-period="month">近20日</button>
+            <button type="button" data-period="year">今年以来</button>
+          </div>
+          <select class="mm-select" id="mmMetric" title="色块面积口径">
+            <option value="value">流通市值</option>
+            <option value="totalMarketCap">总市值</option>
+            <option value="turnoverAmount">成交额</option>
+          </select>
+          <div class="mm-search-wrap">
+            <input type="text" class="mm-search" id="mmSearch" placeholder="搜索名称/代码…" autocomplete="off">
+            <div class="mm-search-pop" id="mmSearchPop" hidden></div>
+          </div>
+          <label class="mm-chk" title="显示板块缩略统计"><input type="checkbox" id="mmMiniToggle"><span>缩略图</span></label>
+        </div>
+      </div>
+
+      <div class="mm-subtoolbar">
+        <div class="mm-filter" id="mmFilter" hidden>
+          <span class="mm-filter-label">筛选：</span>
+          <span class="mm-filter-val" id="mmFilterVal"></span>
+          <button type="button" class="mm-filter-clear" id="mmFilterClear">清除</button>
+        </div>
+        <div class="mm-nav-hint" id="mmNavHint">悬停看详情 · 滚轮缩放 · 拖拽平移 · 双击看行情 · 点板块标题筛选</div>
+        <div class="mm-tools mm-tools-2">
+          <label class="mm-auto" id="mmAutoWrap" title="开启后按设定间隔自动刷新云图数据">
+            <input type="checkbox" id="mmAutoToggle">
+            <span class="mm-auto-track"><span class="mm-auto-thumb"></span></span>
+            <span class="mm-auto-label">自动刷新</span>
+          </label>
+          <select class="mm-select" id="mmInterval" title="自动刷新间隔">
+            <option value="4">4 秒</option>
+            <option value="5">5 秒</option>
+            <option value="6" selected>6 秒</option>
+            <option value="8">8 秒</option>
+            <option value="10">10 秒</option>
+          </select>
+          <span class="mm-countdown" id="mmCountdown" hidden></span>
+          <button type="button" class="mm-btn" id="mmRefreshBtn" title="立即抓取最新数据（强制刷新）">手动刷新</button>
+          <button type="button" class="mm-btn" id="mmFullscreenBtn" title="全屏查看">全屏</button>
+          <span class="mm-updated" id="mmUpdated">—</span>
+        </div>
+      </div>
+
+      <div class="mm-stage" id="mmStage">
+        <canvas id="mmCanvas"></canvas>
+        <div class="mm-mini-panel" id="mmMiniPanel" hidden></div>
+        <div class="mm-tooltip" id="mmTooltip" hidden></div>
+        <div class="mm-empty" id="mmEmpty" hidden>暂无数据</div>
+        <div class="mm-loading" id="mmLoading">云图加载中…</div>
+      </div>
+
+      <div class="mm-bottom">
+        <div class="mm-legend">
+          <span class="mm-legend-label">涨跌幅</span>
+          <span class="mm-legend-down">跌</span>
+          <span class="mm-gradient" id="mmGradient"></span>
+          <span class="mm-legend-up">涨</span>
+          <span class="mm-legend-tip">红涨绿跌 · 面积 = <b id="mmMetricLabel">流通市值</b> · 悬停看详情 · 双击看行情</span>
+        </div>
+        <div class="mm-breadcrumb" id="mmBreadcrumb"></div>
+      </div>
+    </main>
+  </div>
+
+  <!-- 个股详情弹层 -->
+  <div class="mm-detail-mask" id="mmDetailMask" hidden>
+    <div class="mm-detail" role="dialog" aria-modal="true">
+      <button type="button" class="mm-detail-close" id="mmDetailClose">×</button>
+      <div id="mmDetailBody"></div>
+      <div class="mm-detail-foot">
+        <button type="button" class="mm-btn" id="mmDetailWatch">★ 加入自选</button>
+        <button type="button" class="mm-btn primary" id="mmDetailOpen">查看行情 ↗</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 自选抽屉 -->
+  <div class="mm-drawer-mask" id="mmWatchMask" hidden>
+    <div class="mm-drawer" role="dialog" aria-modal="true">
+      <div class="mm-drawer-head">
+        <h3>我的自选 <small id="mmWatchCount">0 只</small></h3>
+        <button type="button" class="mm-drawer-close" id="mmWatchClose">×</button>
+      </div>
+      <div class="mm-watch-add">
+        <input type="text" id="mmWatchInput" placeholder="输入名称或代码，如 工商银行 / 601398">
+        <button type="button" class="mm-btn primary" id="mmWatchAddBtn">添加</button>
+      </div>
+      <div class="mm-watch-search-pop" id="mmWatchSearchPop" hidden></div>
+      <div class="mm-watch-list" id="mmWatchList"></div>
+      <div class="mm-watch-foot">
+        <button type="button" class="mm-btn" id="mmWatchGenerate">生成自选热力图</button>
+        <span class="mm-watch-note">自选保存在本地浏览器</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 投研工具浮层 -->
+  <div class="mm-drawer-mask" id="mmToolsMask" hidden>
+    <div class="mm-drawer mm-tools-drawer" role="dialog" aria-modal="true">
+      <div class="mm-drawer-head">
+        <h3>投研工具</h3>
+        <button type="button" class="mm-drawer-close" id="mmToolsClose">×</button>
+      </div>
+      <div class="mm-tools-list">
+        <a href="https://www.gekkotech.com/" target="_blank" rel="noopener noreferrer"><b>gekkotech</b><span>量化投研平台 ↗</span></a>
+        <a href="https://legulegu.com/stockdata/market-width" target="_blank" rel="noopener noreferrer"><b>市场宽度</b><span>市场宽度与涨跌分布 ↗</span></a>
+        <a href="https://dapanyuntu.com/us" target="_blank" rel="noopener noreferrer"><b>美股大盘云图</b><span>原站美股视图 ↗</span></a>
+      </div>
+      <div class="mm-tools-note">以上为第三方站点，链接仅作导航，数据与我方页面无关。</div>
+    </div>
+  </div>
+</div>
+
+<!-- 登录 / 注册弹层 -->
+<div class="modal-backdrop" id="authModal">
+  <div class="modal auth-box" role="dialog" aria-modal="true" aria-labelledby="authTitle">
+    <div class="auth-logo">金</div>
+    <h2 id="authTitle">登录</h2>
+    <p class="auth-desc" id="authDesc">登录后查看实盘行情、持仓与交易记录</p>
+    <form id="authForm" autocomplete="on">
+      <label class="field"><span>用户名</span>
+        <input type="text" id="authUser" name="username" autocomplete="username" required maxlength="32" placeholder="请输入用户名">
+      </label>
+      <label class="field"><span>密码</span>
+        <input type="password" id="authPass" name="password" autocomplete="current-password" required minlength="6" placeholder="至少 6 位">
+      </label>
+      <div class="auth-error" id="authError" role="alert"></div>
+      <button type="submit" class="primary auth-submit" id="authSubmit">登录</button>
+    </form>
+    <div class="auth-switch" id="authSwitchWrap">
+      首次使用？<button type="button" class="link" id="authSwitch">注册管理员账号</button>
+    </div>
+  </div>
+</div>
+
+<!-- 金种资料弹层 -->
+<div class="modal-backdrop" id="goldInfoModal" hidden>
+  <div class="modal info-box" role="dialog" aria-modal="true" aria-labelledby="goldInfoTitle">
+    <div class="modal-head">
+      <h2 id="goldInfoTitle">金种资料</h2>
+      <button type="button" class="modal-close" id="goldInfoClose" aria-label="关闭">×</button>
+    </div>
+    <p class="modal-desc">给金种加自定义名称、备注和星标；星标金种会排在标签最前。</p>
+    <div class="gold-info-list" id="goldInfoList"></div>
+  </div>
+</div>
+
+<!-- ============ 盘面分析视图 ============ -->
+<div class="view" id="view-corr" hidden>
+  <div class="cr-app">
+    <aside class="cr-side">
+      <div class="cr-brand">
+        <div class="cr-brand-logo">析</div>
+        <div><h2>盘面分析</h2><span>板块 × 黄金 相关性</span></div>
+      </div>
+
+      <div class="cr-sec">
+        <div class="cr-sec-title">黄金基准</div>
+        <div class="cr-bench" id="crBench" role="radiogroup"></div>
+      </div>
+
+      <div class="cr-sec">
+        <div class="cr-sec-title">分析窗口</div>
+        <div class="cr-wins" id="crWindows" role="radiogroup"></div>
+      </div>
+
+      <div class="cr-gold-card" id="crGoldCard">
+        <div class="cr-gold-empty">加载中…</div>
+      </div>
+
+      <div class="cr-side-foot">
+        <div class="cr-note">
+          方法：以板块成分股（流通市值前 N）加权合成板块日收益，与黄金日收益做
+          Pearson / Spearman 相关，t 检验 p 值经 BH-FDR 多重检验校正。
+          <b>q&lt;0.05</b> 视为统计显著。
+        </div>
+      </div>
+    </aside>
+
+    <main class="cr-main">
+      <div class="cr-toolbar">
+        <div class="cr-title-wrap">
+          <h1>板块与黄金涨跌相关性</h1>
+          <span class="cr-pill" id="crRange">—</span>
+          <span class="cr-pill" id="crSample">—</span>
+        </div>
+        <div class="cr-tools">
+          <button type="button" class="mm-btn" id="crRefresh">重新分析</button>
+          <span class="cr-updated" id="crUpdated"></span>
+        </div>
+      </div>
+
+      <div class="cr-body" id="crBody">
+        <div class="cr-kpis" id="crKpis"></div>
+
+        <div class="cr-panel cr-panel-bars">
+          <div class="cr-panel-head">
+            <h3>相关性排行 <small>按 |相关系数| 降序</small></h3>
+            <div class="cr-legend">
+              <span class="cr-lg cr-lg-pos"><i></i>正相关 · 同涨同跌</span>
+              <span class="cr-lg cr-lg-neg"><i></i>负相关 · 反向</span>
+            </div>
+          </div>
+          <div class="cr-bars" id="crBars">
+            <div class="cr-hint">选择市场后显示</div>
+          </div>
+        </div>
+
+        <div class="cr-panel cr-panel-detail" id="crDetailPanel" hidden>
+          <div class="cr-panel-head">
+            <h3 id="crDetailTitle">板块详情</h3>
+            <div class="cr-detail-tabs" id="crDetailTabs">
+              <button type="button" data-tab="scatter" class="active">散点图</button>
+              <button type="button" data-tab="trend">走势对比</button>
+              <button type="button" data-tab="rolling">滚动相关</button>
+            </div>
+          </div>
+          <div class="cr-chart-wrap"><canvas id="crCanvas"></canvas></div>
+          <div class="cr-detail-meta" id="crDetailMeta"></div>
+        </div>
+      </div>
+
+      <div class="cr-overlay" id="crLoading" hidden>
+        <div class="cr-spinner"></div>
+        <p>正在分析板块与黄金的相关性…</p>
+        <p class="cr-overlay-sub">首次运行需拉取成分股历史行情，约 30–60 秒</p>
+      </div>
+      <div class="cr-overlay" id="crEmpty" hidden>
+        <p class="cr-empty-title">暂时没有数据</p>
+        <p class="cr-overlay-sub" id="crEmptyMsg"></p>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script src="/portfolio.js"></script>
+<script src="/marketmap.js"></script>
+<script src="/corr.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>
